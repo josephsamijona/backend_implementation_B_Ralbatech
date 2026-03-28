@@ -4,10 +4,13 @@ const eventEmitter = new events.EventEmitter();
 const rngClass = require('../src/algo/rng');
 const pRNG = new rngClass();
 const rzp = require('razorpay');
-const razp = new rzp({
-    key_id: process.env.RAZORPAY_KEY,
-    key_secret: process.env.RAZORPAY_SECRET
-});
+let razp = null;
+if (process.env.RAZORPAY_KEY && process.env.RAZORPAY_SECRET) {
+    razp = new rzp({
+        key_id: process.env.RAZORPAY_KEY,
+        key_secret: process.env.RAZORPAY_SECRET
+    });
+}
 let appConfig = {};
 
 appConfig.eventEmitter = eventEmitter;
