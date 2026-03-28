@@ -27,7 +27,7 @@ module.exports.setRouter = (app) => {
     app.post(`${baseUrl}/products/platform-all`, auth.isAuthorized, validauth.isVendorAuthorized, productController.getPlatformAllProducts);
 
     // Met à jour le statut displayer/fulfiller d'un vendor pour un produit
-    app.patch(`${baseUrl}/products/:product_id/displayer-fulfiller`, auth.isAuthorized, validauth.isVendorAuthorized, productController.updateDisplayerFulfiller);
+    app.post(`${baseUrl}/products/:product_id/displayer-fulfiller`, auth.isAuthorized, validauth.isVendorAuthorized, productController.updateDisplayerFulfiller);
 
     // Retourne la liste des fulfillers actifs pour un produit (vue web portal)
     app.get(`${baseUrl}/products/:product_id/fulfillers`, auth.isAuthorized, productController.getProductFulfillers);

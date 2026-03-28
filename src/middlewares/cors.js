@@ -17,7 +17,7 @@ const allowedOrigins = [
   'https://preview.ralbatech.com',
   'https://vendorstore.ralbatech.com',
   'https://store.ralbatech.com',
-  'https://api.ralbatech.com',
+  'https://backendimplementationbralbatech-production.up.railway.app',
   'https://ralbaoptical.com'
 ];
 
@@ -45,7 +45,7 @@ function isAllowedOriginFromEnv(origin) {
 }
 
 function isAllowedOrigin(origin) {
- if (isAllowedOriginFromEnv(origin)) {
+  if (isAllowedOriginFromEnv(origin)) {
     return true;
   }
   const clean = normalizeOrigin(origin);

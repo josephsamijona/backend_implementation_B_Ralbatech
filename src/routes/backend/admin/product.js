@@ -12,5 +12,5 @@ module.exports.setRouter = (app) => {
     app.get(`${baseUrl}/admin/products/displayer-fulfiller/pending`, auth.isAuthorized, validauth.isAdminAuthorized, productController.getPendingDisplayerFulfillers);
 
     // Approuver/rejeter le statut displayer-fulfiller d'un vendor pour un produit
-    app.patch(`${baseUrl}/admin/products/:product_id/displayer-fulfiller/:vendor_id`, auth.isAuthorized, validauth.isAdminAuthorized, productController.updateDisplayerFulfillerStatus);
+    app.post(`${baseUrl}/admin/products/:product_id/displayer-fulfiller/:vendor_id`, auth.isAuthorized, validauth.isAdminAuthorized, productController.updateDisplayerFulfillerStatus);
 };
