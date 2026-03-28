@@ -3,7 +3,7 @@
 
 const dotenv = require('dotenv');
 const envConf = dotenv.config({ debug: process.env.DEBUG });
-if (envConf.error) {
+if (envConf.error && envConf.error.code !== 'ENOENT') {
   throw envConf.error;
 }
 
