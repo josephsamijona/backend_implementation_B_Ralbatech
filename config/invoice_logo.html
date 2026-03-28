@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Ralbatech Invoice</title>
+        <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700,900" rel="stylesheet">
+
+        <style type="text/css">
+            body{
+            	text-align: center;
+            	margin: 0 auto;
+            	width: 650px;
+            	font-family: 'Open Sans', sans-serif;
+            	background-color: #e2e2e2;		      	
+            	display: block;
+            }
+            ul{
+            	margin:0;
+            	padding: 0;
+            }
+            li{
+            	display: inline-block;
+            	text-decoration: unset;
+            }
+            a{
+            	text-decoration: none;
+            }
+            p{
+                margin: 15px 0;
+            }
+
+            h5{
+            	color:#444;
+                text-align:left;
+                font-weight:400;
+            }
+            
+            .text-center{
+            	text-align: center
+            }
+            .main-bg-light{
+            	background-color: #fafafa;
+            }
+            .title{
+            	color: #444444;
+            	font-size: 22px;
+            	font-weight: bold;
+            	margin-top: 10px;
+            	margin-bottom: 10px;
+            	padding-bottom: 0;
+            	text-transform: uppercase;
+            	display: inline-block;
+            	line-height: 1;
+            }
+            table{
+                margin-top:30px
+            }
+            table.top-0{
+                margin-top:0;
+            }
+            table.order-detail {
+                border: 1px solid #ddd;
+                border-collapse: collapse;
+            }
+            table.order-detail tr:nth-child(even) {
+              border-top:1px solid #ddd;
+              border-bottom:1px solid #ddd;
+            }
+            table.order-detail tr:nth-child(odd) {
+                border-bottom:1px solid #ddd;
+            }
+            .pad-left-right-space{
+                border: unset !important;
+            }
+            .pad-left-right-space td{
+                padding: 5px 15px;
+            }
+            .pad-left-right-space td p{
+                margin: 0;
+            }
+            .pad-left-right-space td b{
+                font-size:15px;
+                font-family: 'Roboto', sans-serif;
+            }
+            .order-detail th{
+                font-size:16px;
+                padding:15px;
+                text-align:center;
+                background: #fafafa;
+            }
+            .footer-social-icon tr td img{
+                margin-left:5px;
+                margin-right:5px;
+            }
+        </style>
+    </head>
+    <body style="margin: 20px auto;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" style="padding: 0 30px;background-color: #fff; -webkit-box-shadow: 0px 0px 14px -4px rgba(0, 0, 0, 0.2705882353);box-shadow: 0px 0px 14px -4px rgba(0, 0, 0, 0.2705882353);width: 100%;">
+            <tbody>
+                <tr>
+                    <td>
+                        <table align="left" border="0" cellpadding="0" cellspacing="0" style="text-align: left;" width="100%">
+                            <tr>
+                                <td style="text-align: center;">
+                                    <img src="assets/images/email-temp/delivery-2.png" alt="" style="margin-bottom: 30px;">
+                                </td>
+                            </tr>                            
+                           <tr>
+                                <td>
+                                    <p style="font-size: 14px;"><b>Hi John Doe,</b></p>
+                                    <p style="font-size: 14px;">Order Is Successfully Processsed And Your Order Is On The Way,</p>
+                                    <p style="font-size: 14px;">Transaction ID : 267676GHERT105467,</p>
+                                </td>
+                            </tr> 
+                        </table>
+                       
+                        <table cellpadding="0" cellspacing="0" border="0" align="left" style="width: 100%;margin-top: 10px;    margin-bottom: 10px;">
+                                <tbody>
+                                    <tr>
+                                    <td style="background-color: #fafafa;border: 1px solid #ddd;padding: 15px;letter-spacing: 0.3px;width: 50%;">
+                                        <h5 style="font-size: 16px; font-weight: 600;color: #000; line-height: 16px; padding-bottom: 13px; border-bottom: 1px solid #e6e8eb; letter-spacing: -0.65px; margin-top:0; margin-bottom: 13px;">Your Shipping Address</h5>
+                                        <p style="text-align: left;font-weight: normal; font-size: 14px; color: #000000;line-height: 21px;    margin-top: 0;">268 Cambridge Lane New Albany,<br> IN 47150268 Cambridge Lane <br>New Albany, IN 47150</p>
+                                    </td>
+                                    <td>
+                                        <img src="data:image/jpeg;base64,/9j/4QAYRXhpZgAASUkqAAgAAAAAAAAAAAAAAP/sABFEdWNreQABAAQAAABkAAD/4QMqaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8P3hwYWNrZXQgYmVnaW49Iu+7vyIgaWQ9Ilc1TTBNcENlaGlIenJlU3pOVGN6a2M5ZCI/PiA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJBZG9iZSBYTVAgQ29yZSA1LjUtYzAxNCA3OS4xNTE0ODEsIDIwMTMvMDMvMTMtMTI6MDk6MTUgICAgICAgICI+IDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+IDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bXA6Q3JlYXRvclRvb2w9IkFkb2JlIFBob3Rvc2hvcCBDQyAoV2luZG93cykiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6OEFEODUzNTkyMDVEMTFFOTg4NEY4QjE5ODk1OTQ1NDMiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6OEFEODUzNUEyMDVEMTFFOTg4NEY4QjE5ODk1OTQ1NDMiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo4QUQ4NTM1NzIwNUQxMUU5ODg0RjhCMTk4OTU5NDU0MyIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDo4QUQ4NTM1ODIwNUQxMUU5ODg0RjhCMTk4OTU5NDU0MyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/Pv/uAA5BZG9iZQBkwAAAAAH/2wCEAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQECAgICAgICAgICAgMDAwMDAwMDAwMBAQEBAQEBAgEBAgICAQICAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA//AABEIAAEAAQMBEQACEQEDEQH/xABKAAEAAAAAAAAAAAAAAAAAAAAKAQEAAAAAAAAAAAAAAAAAAAAAEAEAAAAAAAAAAAAAAAAAAAAAEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwB/AP/Z" alt=" " height="25" width="30"></td>
+                                    </td>
+                                    <td style="background-color: #fafafa;border: 1px solid #ddd;padding: 15px;letter-spacing: 0.3px;width: 50%;">
+                                        <h5 style="font-size: 16px;font-weight: 600;color: #000; line-height: 16px; padding-bottom: 13px; border-bottom: 1px solid #e6e8eb; letter-spacing: -0.65px; margin-top:0; margin-bottom: 13px;">Your Billing Address:</h5>
+                                       <p style="text-align: left;font-weight: normal; font-size: 14px; color: #000000;line-height: 21px;    margin-top: 0;">268 Cambridge Lane New Albany,<br> IN 47150268 Cambridge Lane <br>New Albany, IN 47150</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <table class="order-detail" border="0" cellpadding="0" cellspacing="0"  align="left" style="width: 100%;    margin-bottom: 50px;">
+                            <tr align="left">
+                                <th>PRODUCT</th>
+                                <th style="padding-left: 15px;">DESCRIPTION</th>
+                                <th>QUANTITY</th>
+                                <th>PRICE </th>
+                            </tr>
+                            <tr>                                
+                                <td>
+                                    <img src="assets/images/email-temp/15.jpg" alt="" width="80">
+                                </td>
+                                <td valign="top" style="padding-left: 15px;">
+                                    <h5 style="margin-top: 15px;">Three seater Wood Style sofa for Leavingroom </h5>
+                                </td>
+                                <td valign="top" style="padding-left: 15px;">
+                                    <h5 style="font-size: 14px; color:#444;margin-top:15px;    margin-bottom: 0px;">Addons : <span>$300</span> </h5>
+                                    <h5 style="font-size: 14px; color:#444;margin-top: 10px;">QTY : <span>1</span></h5>                                    
+                                </td>
+                                <td valign="top" style="padding-left: 15px;">
+                                    <h5 style="font-size: 14px; color:#444;margin-top:15px"><b>$500</b></h5>                  
+                                </td>
+                            </tr>
+                            <tr>                                
+                                <td>
+                                    <img src="assets/images/email-temp/16.jpg" alt="" width="80">
+                                </td>
+                                <td valign="top" style="padding-left: 15px;">
+                                    <h5 style="margin-top: 15px;">Three seater Wood Style sofa for Leavingroom </h5>
+                                </td>
+                                <td valign="top" style="padding-left: 15px;">
+                                    <h5 style="font-size: 14px; color:#444;margin-top:15px;    margin-bottom: 0px;">Addons : <span>$300</span> </h5>
+                                    <h5 style="font-size: 14px; color:#444;margin-top: 10px;">QTY : <span>1</span></h5>                                    
+                                </td>
+                                <td valign="top" style="padding-left: 15px;">
+                                    <h5 style="font-size: 14px; color:#444;margin-top:15px"><b>$500</b></h5>                  
+                                </td>
+                            </tr>
+                            <tr class="pad-left-right-space ">
+                                <td class="m-t-5" colspan="2" align="left">
+                                    <p style="font-size: 14px;">Subtotal : </p>
+                                </td>
+                                <td class="m-t-5" colspan="2" align="right">
+                                    <b style>$2000</b>
+                                </td>
+                            <tr class="pad-left-right-space">
+                                <td colspan="2" align="left">
+                                    <p style="font-size: 14px;">TAX :</p>
+                                </td>
+                                <td colspan="2" align="right">
+                                    <b>$5</b>
+                                </td>
+                            </tr>
+                            <tr class="pad-left-right-space">
+                                <td colspan="2" align="left">
+                                    <p style="font-size: 14px;">SHIPPING Charge :</p>
+                                </td>
+                                <td colspan="2" align="right">
+                                    <b>$2</b>
+                                </td>
+                            </tr>
+                            <tr class="pad-left-right-space ">
+                                <td class="m-b-5" colspan="2" align="left">
+                                    <p style="font-size: 14px;">Total :</p>
+                                </td>
+                                <td class="m-b-5" colspan="2" align="right">
+                                    <b>$2600</b>
+                                </td>
+                            </tr>
+                           
+                        </table>
+                        
+                    </td>
+                </tr>
+            </tbody>            
+        </table>
+        <table class="main-bg-light text-center top-0"  align="center" border="0" cellpadding="0" cellspacing="0" width="100%">
+            <tr>
+                <td style="padding-bottom: 30px;">
+                    <div style="border-top: 1px solid #ddd; margin: 20px auto 0;"></div>
+                    <table  border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px auto 0;" >
+                        <tr>
+                            <td>
+                                <p style="font-size:13px; margin:0;">Copyright © 2024 RALBA Tech. All rights reserved.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+</html>
