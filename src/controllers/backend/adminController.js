@@ -1083,7 +1083,8 @@ let vendorgenerateOtp = async (req, res) => {
         otpValue: otpval,
         otpType: req.body.type
     })
-    try {
+    console.log("newotp:"+newOtp);
+    try { 
         await newOtp.save((err, newOtp) => {
 
             //Send OTP Template
