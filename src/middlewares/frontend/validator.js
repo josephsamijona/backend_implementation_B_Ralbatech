@@ -158,6 +158,8 @@ let productsobj = Joi.object().keys({
     pro_name: Joi.required(),
     pro_image: Joi.required(),
     pro_slug: Joi.required(),
+    product_owner_id: Joi.string().allow('', null),
+    fulfiller_vendor_id: Joi.string().allow('', null),
     left_eye_qty: Joi.allow(''),
     right_eye_qty: Joi.allow(''),
     qty: Joi.number().required(),
@@ -613,7 +615,7 @@ let usergetShippingTaxValidate = async (req, res, next) => {
 }
 
 const usergetShippingTaxValidateSchema = Joi.object({
-    vendor_id: Joi.string().required()
+    vendor_id: Joi.string().allow('', null)
 })
 
 
@@ -646,7 +648,7 @@ const userOrderCreateValidateSchema = Joi.object({
     billing_email: Joi.string().required(),
     billing_phone: Joi.string().required(),
     cart_id: Joi.allow(''),
-    vendor_id: Joi.string().required(),
+    vendor_id: Joi.string().allow('', null),
     store_slug: Joi.string().required(),
     coupon: Joi.string().allow('',null),
 })
@@ -684,7 +686,7 @@ const userOrderPaymentValidateSchema = Joi.object({
     billing_email: Joi.allow(''),
     billing_phone: Joi.allow(''),
     cart_id: Joi.allow(''),
-    vendor_id: Joi.string().required(),
+    vendor_id: Joi.string().allow('', null),
     paypal_data: Joi.allow(''),
     store_slug: Joi.string().required(),
     coupon: Joi.string().allow('',null),

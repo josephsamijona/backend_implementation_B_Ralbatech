@@ -25,7 +25,7 @@ appConfig.razp = razp;
 appConfig.redis_url = process.env.REDIS_URL;
 
 
-appConfig.baseUrl = 'http://localhost:5000/api/v1/';
+appConfig.baseUrl = 'https://loving-passion-production-157f.up.railway.app/api/v1/';
 
 
 module.exports = appConfig;

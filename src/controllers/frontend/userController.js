@@ -745,14 +745,104 @@ let userForgotPassword = async (req, res) => {
     *
     * @functionError {Boolean} error error is there.
     */
+const toObjectId = (value) => {
+    if (!value || !mongoose.Types.ObjectId.isValid(value)) {
+        return null;
+    }
+    return mongoose.Types.ObjectId(value);
+};
+
+const resolveEffectiveVendorId = (cartLine, productDoc) => {
+    const fulfillerId = toObjectId(cartLine?.fulfiller_vendor_id);
+    if (fulfillerId) {
+        return fulfillerId;
+    }
+    const ownerIdFromCart = toObjectId(cartLine?.product_owner_id);
+    if (ownerIdFromCart) {
+        return ownerIdFromCart;
+    }
+    const ownerIdFromProduct = toObjectId(productDoc?.product_owner);
+    if (ownerIdFromProduct) {
+        return ownerIdFromProduct;
+    }
+    return null;
+};
+
+const loadCartByRequest = async (req) => {
+    const authUserId = toObjectId(req?.user?.user_id);
+    if (!authUserId) {
+        throw new Error('Invalid user token');
+    }
+
+    const requestedCartId = toObjectId(req.body.cart_id);
+    const query = {
+        user_id: authUserId
+    };
+
+    if (requestedCartId) {
+        query._id = requestedCartId;
+    }
+
+    return cartModel.findOne(query).lean();
+};
+
+const resolveCartEffectiveVendorContext = async (cartProducts) => {
+    const cartLines = Array.isArray(cartProducts?.products) ? cartProducts.products : [];
+    const productIds = cartLines
+        .map((line) => toObjectId(line?.pro_id))
+        .filter((id) => !!id);
+
+    const productDocs = await Product.find({ _id: { $in: productIds } })
+        .select('_id product_owner product_slug')
+        .lean();
+
+    const productById = new Map(productDocs.map((doc) => [String(doc._id), doc]));
+    const productBySlug = new Map(productDocs.map((doc) => [String(doc.product_slug), doc]));
+
+    const effectiveVendorIds = [];
+    for (const line of cartLines) {
+        const lineProduct = productById.get(String(line?.pro_id)) || productBySlug.get(String(line?.pro_slug));
+        const effectiveVendorId = resolveEffectiveVendorId(line, lineProduct);
+        if (!effectiveVendorId) {
+            throw new Error(`Unable to resolve effective vendor for cart item ${line?.pro_slug || line?.pro_id}`);
+        }
+        effectiveVendorIds.push(String(effectiveVendorId));
+    }
+
+    const uniqueVendorIds = Array.from(new Set(effectiveVendorIds));
+    if (uniqueVendorIds.length > 1) {
+        throw new Error('All products in cart must belong to the same effective vendor.');
+    }
+
+    return {
+        effectiveVendorId: uniqueVendorIds.length ? mongoose.Types.ObjectId(uniqueVendorIds[0]) : null
+    };
+};
+
 let userGetShippingTax = async (req, res) => {
 
     try {
-        let shippingData
-        shippingData = await VendorShippingTaxModel.find({ vendor_id: mongoose.Types.ObjectId(req.body.vendor_id) })
-        if (checkLib.isEmpty(shippingData)) {
-            shippingData = await ShippingTaxModel.find({})
+        let shippingData = [];
+        const cartProducts = await loadCartByRequest(req);
+
+        let effectiveVendorId = null;
+        if (cartProducts && Array.isArray(cartProducts.products) && cartProducts.products.length > 0) {
+            const context = await resolveCartEffectiveVendorContext(cartProducts);
+            effectiveVendorId = context.effectiveVendorId;
         }
+
+        if (!effectiveVendorId) {
+            effectiveVendorId = toObjectId(req.body.vendor_id);
+        }
+
+        if (effectiveVendorId) {
+            shippingData = await VendorShippingTaxModel.find({ vendor_id: effectiveVendorId }).lean();
+        }
+
+        if (checkLib.isEmpty(shippingData)) {
+            shippingData = await ShippingTaxModel.find({}).lean();
+        }
+
         let apiResponse = response.generate(0, ` Success`, shippingData);
         res.status(200);
         res.send(apiResponse);
@@ -781,24 +871,20 @@ let userGetShippingTax = async (req, res) => {
 
 let userOrderCreate = async (req, res) => {
     try {
-        let store_details = await StoreModel.find({ "store_slug": req.body.store_slug, "status": 'active' }).lean();
-        if (checkLib.isEmpty(store_details)) {
+        const storeDetails = await StoreModel.findOne({ store_slug: req.body.store_slug, status: 'active' }).lean();
+        if (checkLib.isEmpty(storeDetails)) {
             throw new Error('Store is Empty');
         }
-        let vendorDeatils = await vendorModel.findOne({ _id: store_details[0].store_owner })
-        let vendor_id = store_details[0].is_copy ? store_details[0].main_vendor_id : store_details[0].store_owner;
 
-        // Fetch all required data concurrently
-        const [billingAddress, shippingData] = await Promise.all([
-            UserAddress.findOne({ _id: mongoose.Types.ObjectId(req.body.billing_address_id) }).lean(),
-            VendorShippingTaxModel.find({ vendor_id: mongoose.Types.ObjectId(vendor_id) }).lean()
-        ]);
-        let cartProducts;
-        if (checkLib.isEmpty(req.body.cart_id)) {
-            cartProducts = await cartModel.findOne({ user_id: mongoose.Types.ObjectId(req.user.user_id) }).lean();
-        } else {
-            cartProducts = await cartModel.findOne({ _id: mongoose.Types.ObjectId(req.body.cart_id) }).lean();
+        const billingAddressId = toObjectId(req.body.billing_address_id);
+        if (!billingAddressId) {
+            return res.status(400).send(response.generate(1, 'Billing address is invalid', {}));
         }
+
+        const [billingAddress, cartProducts] = await Promise.all([
+            UserAddress.findOne({ _id: billingAddressId }).lean(),
+            loadCartByRequest(req)
+        ]);
 
         // Validate cart exists and has products
         if (!cartProducts || !cartProducts.products || cartProducts.products.length === 0) {
@@ -810,10 +896,14 @@ let userOrderCreate = async (req, res) => {
             return res.status(400).send(response.generate(1, 'Billing address not found', {}));
         }
 
-        // Fallback for shipping data
-        const shippingDataFallback = checkLib.isEmpty(shippingData)
-            ? await ShippingTaxModel.find({}).lean()
-            : shippingData;
+        const vendorContext = await resolveCartEffectiveVendorContext(cartProducts);
+        const operationalVendorId = vendorContext.effectiveVendorId || toObjectId(req.body.vendor_id);
+
+        let shippingData = [];
+        if (operationalVendorId) {
+            shippingData = await VendorShippingTaxModel.find({ vendor_id: operationalVendorId }).lean();
+        }
+        const shippingDataFallback = checkLib.isEmpty(shippingData) ? await ShippingTaxModel.find({}).lean() : shippingData;
 
         const shippingCharge = shippingDataFallback[0]?.shipping_charge || 0;
         const taxPercentage = shippingDataFallback[0]?.tax_percentage || 0;
@@ -889,8 +979,15 @@ let userOrderCreate = async (req, res) => {
         }).save();
 
         // Process products
+        const vendorMetaCache = new Map();
         for (const od of cartProducts.products) {
-            const prodRecord = await Product.findOne({ product_slug: od.pro_slug }).lean();
+            let prodRecord = toObjectId(od.pro_id)
+                ? await Product.findById(mongoose.Types.ObjectId(od.pro_id)).lean()
+                : null;
+
+            if (!prodRecord && od.pro_slug) {
+                prodRecord = await Product.findOne({ product_slug: od.pro_slug }).lean();
+            }
 
             // Validate product exists
             if (!prodRecord) {
@@ -914,13 +1011,30 @@ let userOrderCreate = async (req, res) => {
                 Product.findOneAndUpdate({ _id: mongoose.Types.ObjectId(od.pro_id) }, { stock: updatedStock }, { new: true })
             ]);
 
-            const commissionDetails = await calculateCommission((parseFloat(od.price) + parseFloat(od.addonsprice)), od.pro_id, od.qty, store_details[0].store_owner, vendorDeatils.vendor_type);
+            const effectiveVendorId = resolveEffectiveVendorId(od, prodRecord);
+            if (!effectiveVendorId) {
+                throw new Error(`Unable to resolve effective vendor for product ${od.pro_slug || od.pro_id}`);
+            }
+
+            let vendorMeta = vendorMetaCache.get(String(effectiveVendorId));
+            if (!vendorMeta) {
+                vendorMeta = await vendorModel.findOne({ _id: effectiveVendorId }).select('vendor_type').lean();
+                vendorMetaCache.set(String(effectiveVendorId), vendorMeta || { vendor_type: 'main' });
+            }
+
+            const commissionDetails = await calculateCommission(
+                (parseFloat(od.price) + parseFloat(od.addonsprice || 0)),
+                od.pro_id,
+                od.qty,
+                effectiveVendorId,
+                vendorMeta?.vendor_type || 'main'
+            );
 
             // Save order details along with commission details
             await new orderdetails({
                 order_id: orderResult._id,
                 store_id: prodRecord.product_store,
-                vendor_id: prodRecord.product_owner,
+                vendor_id: effectiveVendorId,
                 department_id: prodRecord.product_department,
                 product_id: od.pro_id,
                 product_name: od.pro_name,
@@ -931,7 +1045,7 @@ let userOrderCreate = async (req, res) => {
                 qty: od.qty,
                 price: od.price,
                 addons: od.addons,
-                addonsprice: od.addonsprice,
+                addonsprice: od.addonsprice || 0,
                 commission_details: commissionDetails  // Include commission details here
             }).save();
         }
@@ -1071,22 +1185,34 @@ let userOrderPayment = async (req, res) => {
         if (checkLib.isEmpty(storeDetails)) {
             throw new Error('Store is Empty');
         }
-        let vendorDetails = await vendorModel.findOne({ _id: storeDetails.store_owner })
         let subAdminDetails = await Admin.find({ name: { $ne: "Super Admin" } }).lean();
-        console.log('subAdminDetails:', subAdminDetails);
 
-        // Fetch all required data concurrently
-        const [shippingData, shippingAddress] = await Promise.all([
-            VendorShippingTaxModel.find({ vendor_id: mongoose.Types.ObjectId(req.body.vendor_id) }).lean(),
-            UserAddress.findOne({ _id: mongoose.Types.ObjectId(req.body.shipping_address_id) }).lean()
+        const shippingAddressId = toObjectId(req.body.shipping_address_id);
+        if (!shippingAddressId) {
+            return res.status(400).send(response.generate(1, 'shipping_address_id is invalid', {}));
+        }
+
+        const [shippingAddress, cartProducts] = await Promise.all([
+            UserAddress.findOne({ _id: shippingAddressId }).lean(),
+            loadCartByRequest(req)
         ]);
 
-        let cartProducts;
-        if (checkLib.isEmpty(req.body.cart_id)) {
-            cartProducts = await cartModel.findOne({ user_id: mongoose.Types.ObjectId(req.user.user_id) }).lean()
+        if (!shippingAddress) {
+            return res.status(400).send(response.generate(1, 'Shipping address not found', {}));
         }
-        else {
-            cartProducts = await cartModel.findOne({ _id: mongoose.Types.ObjectId(req.body.cart_id) }).lean()
+        if (!cartProducts || !Array.isArray(cartProducts.products) || cartProducts.products.length === 0) {
+            return res.status(400).send(response.generate(1, 'Cart is empty or not found', {}));
+        }
+
+        const vendorContext = await resolveCartEffectiveVendorContext(cartProducts);
+        const operationalVendorId = vendorContext.effectiveVendorId || toObjectId(req.body.vendor_id);
+        const vendorDetails = operationalVendorId
+            ? await vendorModel.findOne({ _id: operationalVendorId }).lean()
+            : await vendorModel.findOne({ _id: storeDetails.store_owner }).lean();
+
+        let shippingData = [];
+        if (operationalVendorId) {
+            shippingData = await VendorShippingTaxModel.find({ vendor_id: operationalVendorId }).lean();
         }
 
         // Fallback for shipping data
@@ -1248,7 +1374,7 @@ let userOrderPayment = async (req, res) => {
         try {
             await sendemail.sendEmail(req.user.email, {
                 body: renderedTemplate,
-                cc: [process.env.ADMIN_EMAIL, vendorDetails.email, ...subAdminDetails.map(admin => admin.email)],
+                cc: [process.env.ADMIN_EMAIL, vendorDetails?.email, ...subAdminDetails.map(admin => admin.email)].filter(Boolean),
                 // cc: [process.env.ADMIN_EMAIL, vendorDetails.email],
                 subject: req.body.transaction_id > 0 ? "Order confirmation" : "Order confirmation Pending",
                 attachments: [{ content: pdfStream, contentType: "application/pdf", filename: "invoice.pdf" }]

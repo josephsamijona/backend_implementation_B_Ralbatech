@@ -20,6 +20,8 @@ module.exports.setRouter = (app) => {
     // Liste les MTGs en attente d'approbation
     app.get(`${baseUrl}/admin/mtg/pending`, auth.isAuthorized, validauth.isAdminAuthorized, adminMediaTextContentController.getPendingMTGs);
 
-    // Changer le statut d'un MTG (pending → active ou inactive)
+    // Changer le statut d'un MTG (pending -> active ou inactive)
+    app.patch(`${baseUrl}/admin/mtg/:mtg_id/status`, auth.isAuthorized, validauth.isAdminAuthorized, adminMediaTextContentController.updateMTGStatus);
+    // Compat legacy
     app.post(`${baseUrl}/admin/mtg/:mtg_id/status`, auth.isAuthorized, validauth.isAdminAuthorized, adminMediaTextContentController.updateMTGStatus);
 }

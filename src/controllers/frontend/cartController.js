@@ -195,116 +195,161 @@ findProducts = (user_id) => {
     */
 let addCartBulk = async (req, res) => {
     const user_id = req.user.user_id;
-    const products = req.body.products; // Array of products to be added or updated
+    const products = Array.isArray(req.body.products) ? req.body.products : [];
+
+    const toObjectId = (id) => {
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+        return mongoose.Types.ObjectId(id);
+    };
+
+    const toNumber = (value, fallback = 0) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    };
 
     try {
-        let cart = await Cart.findOne({ "user_id": mongoose.Types.ObjectId(user_id) });
+        if (products.length === 0) {
+            return res.status(400).send(response.generate(1, 'products is required', {}));
+        }
 
-        if (cart) {
-            let existingProductOwner;
+        const productIds = [];
+        for (const p of products) {
+            const id = toObjectId(p.pro_id);
+            if (!id) {
+                return res.status(400).send(response.generate(1, 'Invalid pro_id in products', {}));
+            }
+            productIds.push(id);
+        }
 
-            // Perform the check only if there are products in the cart
-            if (cart.products.length > 0) {
-                // Get the product_owner of the first product in the cart
-                existingProductOwner = await Product.findOne({ _id: cart?.products[0]?.pro_id }).select('product_owner');
+        const productDocs = await Product.find({ _id: { $in: productIds } })
+            .select('_id product_owner product_sale_price product_retail_price displayer_fulfiller')
+            .lean();
+
+        const productMap = new Map();
+        for (const doc of productDocs) {
+            productMap.set(String(doc._id), doc);
+        }
+
+        const normalizedLines = [];
+        for (const raw of products) {
+            const productId = String(raw.pro_id);
+            const productDoc = productMap.get(productId);
+            if (!productDoc) {
+                return res.status(404).send(response.generate(1, `Product not found: ${productId}`, {}));
             }
 
-            // Check for existing product owner only if there are products in the cart
-            if (existingProductOwner) {
-                for (const product of products) {
-                    const { pro_id, left_eye_qty, right_eye_qty, qty, price, addons, addonsprice, pro_image, pro_name, pro_slug } = product;
+            const qty = toNumber(raw.qty, 0);
+            if (!Number.isFinite(qty) || qty <= 0) {
+                return res.status(400).send(response.generate(1, 'qty must be a positive number', {}));
+            }
 
-                    // Fetch the product_owner of the current product
-                    const currentProduct = await Product.findOne({ _id: pro_id }).select('product_owner');
+            const ownerVendorId = String(productDoc.product_owner);
+            const requestedFulfillerId = raw.fulfiller_vendor_id ? String(raw.fulfiller_vendor_id) : null;
 
-                    // Check if the product_owner matches the existing one
-                    if (!currentProduct || currentProduct.product_owner.toString() !== existingProductOwner?.product_owner.toString()) {
-                        return res.status(400).json({ message: "All products must be from the same owner." });
-                    }
+            let effectiveVendorId = ownerVendorId;
+            let effectivePrice = (productDoc.product_sale_price !== null && productDoc.product_sale_price !== undefined)
+                ? Number(productDoc.product_sale_price)
+                : Number(productDoc.product_retail_price);
 
-                    let productIndex = cart.products.findIndex(p => p.pro_id.toString() === pro_id);
+            if (requestedFulfillerId && requestedFulfillerId !== ownerVendorId) {
+                const dfEntry = (productDoc.displayer_fulfiller || []).find((df) =>
+                    df.vendor_id &&
+                    String(df.vendor_id) === requestedFulfillerId &&
+                    df.fulfiller_status === 'active' &&
+                    df.multi_vendor_support === true
+                );
 
-                    if (productIndex >= 0) {
-                        // Update existing product
-                        cart.products[productIndex].left_eye_qty = left_eye_qty;
-                        cart.products[productIndex].right_eye_qty = right_eye_qty;
-                        cart.products[productIndex].qty = qty;
-                        cart.products[productIndex].price = price;
-                        cart.products[productIndex].sub_total = ((price + addonsprice) * qty);
-                        cart.products[productIndex].addons = addons;
-                        cart.products[productIndex].addonsprice = addonsprice;
-                    } else {
-                        // Add new product to cart
-                        cart.products.push({
-                            pro_id,
-                            left_eye_qty,
-                            right_eye_qty,
-                            qty,
-                            price,
-                            addons,
-                            addonsprice,
-                            pro_image,
-                            pro_name,
-                            pro_slug,
-                            sub_total: ((price + addonsprice) * qty),
-                        });
-                    }
+                if (!dfEntry || dfEntry.vendor_sales_price === null || dfEntry.vendor_sales_price === undefined) {
+                    return res.status(400).send(response.generate(1, 'Invalid or inactive fulfiller for this product', {}));
                 }
 
-                // Recalculate the total
-                cart.total = cart.products.reduce((acc, prod) => acc + prod.sub_total, 0);
-
-                // Save the updated cart
-                cart = await cart.save();
-
-            } else {
-                // If cart has no products, just add the new products without checking the owner
-                const newProducts = products.map(product => ({
-                    ...product,
-                    sub_total: (product.qty * product.price) + product.addonsprice,
-                }));
-
-                const total = newProducts.reduce((acc, prod) => acc + prod.sub_total, 0);
-
-                cart.products.push(...newProducts);
-                cart.total = total;
-
-                cart = await cart.save();
+                effectiveVendorId = requestedFulfillerId;
+                effectivePrice = Number(dfEntry.vendor_sales_price);
             }
 
-        } else {
-            // New cart creation
-            const firstProduct = await Product.findOne({ _id: products[0].pro_id }).select('product_owner');
+            if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+                return res.status(400).send(response.generate(1, 'Unable to resolve product price for selected fulfiller', {}));
+            }
 
-            // Ensure all products belong to the same owner
-            for (const product of products) {
-                const currentProduct = await Product.findOne({ _id: product.pro_id }).select('product_owner');
+            const addonsPrice = toNumber(raw.addonsprice, 0);
+            const line = {
+                pro_id: productDoc._id,
+                pro_name: raw.pro_name,
+                pro_image: raw.pro_image,
+                pro_slug: raw.pro_slug,
+                product_owner_id: productDoc.product_owner,
+                fulfiller_vendor_id: effectiveVendorId === ownerVendorId ? null : toObjectId(effectiveVendorId),
+                left_eye_qty: toNumber(raw.left_eye_qty, 0),
+                right_eye_qty: toNumber(raw.right_eye_qty, 0),
+                qty,
+                price: effectivePrice,
+                addons: raw.addons || [],
+                addonsprice: addonsPrice,
+                sub_total: (effectivePrice + addonsPrice) * qty
+            };
 
-                if (!currentProduct || currentProduct.product_owner.toString() !== firstProduct.product_owner.toString()) {
-                    return res.status(400).json({ message: "All products must be from the same owner." });
+            normalizedLines.push({
+                effectiveVendorId,
+                line
+            });
+        }
+
+        let cart = await Cart.findOne({ user_id: mongoose.Types.ObjectId(user_id) });
+
+        let cartVendorId = null;
+        if (cart && cart.products.length > 0) {
+            const firstCartItem = cart.products[0];
+            if (firstCartItem.fulfiller_vendor_id) {
+                cartVendorId = String(firstCartItem.fulfiller_vendor_id);
+            } else if (firstCartItem.product_owner_id) {
+                cartVendorId = String(firstCartItem.product_owner_id);
+            } else if (firstCartItem.pro_id) {
+                const firstProduct = await Product.findById(firstCartItem.pro_id).select('product_owner').lean();
+                if (firstProduct?.product_owner) {
+                    cartVendorId = String(firstProduct.product_owner);
                 }
             }
+        }
 
-            const newProducts = products.map(product => ({
-                ...product,
-                sub_total: (product.qty * product.price) + product.addonsprice,
-            }));
+        for (const normalized of normalizedLines) {
+            if (cartVendorId && normalized.effectiveVendorId !== cartVendorId) {
+                return res.status(400).send(response.generate(1, 'All products must be from the same fulfiller vendor.', {}));
+            }
+        }
 
-            const total = newProducts.reduce((acc, prod) => acc + prod.sub_total, 0);
-
+        if (!cart) {
             cart = new Cart({
                 user_id: mongoose.Types.ObjectId(user_id),
-                products: newProducts,
-                total: total,
+                products: [],
+                total: 0
             });
-
-            cart = await cart.save();
         }
+
+        for (const normalized of normalizedLines) {
+            const { line } = normalized;
+            const productIndex = cart.products.findIndex((p) => String(p.pro_id) === String(line.pro_id));
+
+            if (productIndex >= 0) {
+                cart.products[productIndex].left_eye_qty = line.left_eye_qty;
+                cart.products[productIndex].right_eye_qty = line.right_eye_qty;
+                cart.products[productIndex].qty = line.qty;
+                cart.products[productIndex].price = line.price;
+                cart.products[productIndex].addons = line.addons;
+                cart.products[productIndex].addonsprice = line.addonsprice;
+                cart.products[productIndex].product_owner_id = line.product_owner_id;
+                cart.products[productIndex].fulfiller_vendor_id = line.fulfiller_vendor_id;
+                cart.products[productIndex].sub_total = line.sub_total;
+            } else {
+                cart.products.push(line);
+            }
+        }
+
+        cart.total = cart.products.reduce((acc, prod) => acc + toNumber(prod.sub_total, 0), 0);
+        cart = await cart.save();
 
         let apiResponse = response.generate(0, `Success`, cart);
         res.status(200).send(apiResponse);
     } catch (err) {
-        // Send Error Response
         let apiResponse = response.generate(0, ` ${err.message}`, {});
         res.status(410);
         res.send(apiResponse);

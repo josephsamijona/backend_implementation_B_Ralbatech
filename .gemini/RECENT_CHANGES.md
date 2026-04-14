@@ -75,7 +75,7 @@ const { Readable } = require("stream");
 
 To test the order payment API:
 ```bash
-curl 'http://localhost:5000/api/v1/user/orderPayment' \
+curl 'http://backendimplementationbralbatech-production.up.railway.app/api/v1/user/orderPayment' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   --data-raw '{

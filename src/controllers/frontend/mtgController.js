@@ -5,10 +5,16 @@ const Store = require('../../models/storeModel');
 const mongoose = require('mongoose');
 const checkLib = require("../../libs/checkLib");
 
+const toObjectId = (id) => {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        return null;
+    }
+    return mongoose.Types.ObjectId(id);
+};
+
 /**
  * getPlatformMTGList
  * Liste tous les MTGs de la plateforme avec statut 'active'
- * Utilisé par le Vendor Portal pour choisir un MTG existant
  */
 let getPlatformMTGList = async (req, res) => {
     try {
@@ -16,16 +22,16 @@ let getPlatformMTGList = async (req, res) => {
             status: 'active',
             mtg_status: 'active'
         })
-        .populate({
-            path: 'vendor_id',
-            select: 'name stores',
-            populate: {
-                path: 'stores',
-                select: 'store_slug store_name logo'
-            }
-        })
-        .sort({ position: 1 })
-        .lean();
+            .populate({
+                path: 'vendor_id',
+                select: 'name stores',
+                populate: {
+                    path: 'stores',
+                    select: 'store_slug store_name logo status'
+                }
+            })
+            .sort({ position: 1 })
+            .lean();
 
         let apiResponse = response.generate(0, 'Platform MTG list retrieved successfully', { mtgList });
         res.status(200).send(apiResponse);
@@ -38,13 +44,15 @@ let getPlatformMTGList = async (req, res) => {
 
 /**
  * createVendorMTG
- * Crée un nouveau MTG (vendor) → statut 'pending' jusqu'à approbation admin
+ * Cr�e un nouveau MTG vendor -> pending
  */
 let createVendorMTG = async (req, res) => {
     try {
-        let vendor_id = req.user.vendor_id;
+        let vendorId = toObjectId(req?.user?.vendor_id);
+        if (!vendorId) {
+            return res.status(401).send(response.generate(1, 'Invalid vendor token', {}));
+        }
 
-        // Validation
         if (checkLib.isEmpty(req.body.heading_text)) {
             return res.status(400).send(response.generate(1, 'heading_text is required', {}));
         }
@@ -56,13 +64,13 @@ let createVendorMTG = async (req, res) => {
         }
 
         let newMTG = new MediaTextContent({
-            heading_text: req.body.heading_text,
-            description_text: req.body.description_text,
+            heading_text: String(req.body.heading_text).trim(),
+            description_text: String(req.body.description_text).trim(),
             section_image: req.body.section_image,
             section_image_name: req.body.section_image_name || '',
-            tags: req.body.tags || [],
-            vendor_id: mongoose.Types.ObjectId(vendor_id),
-            mtg_status: 'pending', // Toujours pending — jamais auto-approuvé
+            tags: Array.isArray(req.body.tags) ? req.body.tags : [],
+            vendor_id: vendorId,
+            mtg_status: 'pending',
             status: 'active'
         });
 
@@ -78,19 +86,23 @@ let createVendorMTG = async (req, res) => {
 
 /**
  * addMTGToVendorStore
- * Ajoute un MTG existant de la plateforme à la landing page du vendor
+ * Ajoute un MTG existant � la landing page du vendor connect�
  */
 let addMTGToVendorStore = async (req, res) => {
     try {
-        let { vendor_id, media_text_contain_id, position } = req.body;
+        const vendorId = toObjectId(req?.user?.vendor_id);
+        const mediaTextContainId = toObjectId(req.body.media_text_contain_id);
+        const position = Number.isFinite(Number(req.body.position)) ? Number(req.body.position) : 0;
 
-        if (checkLib.isEmpty(vendor_id) || checkLib.isEmpty(media_text_contain_id)) {
-            return res.status(400).send(response.generate(1, 'vendor_id and media_text_contain_id are required', {}));
+        if (!vendorId) {
+            return res.status(401).send(response.generate(1, 'Invalid vendor token', {}));
+        }
+        if (!mediaTextContainId) {
+            return res.status(400).send(response.generate(1, 'media_text_contain_id is required', {}));
         }
 
-        // Vérifier que le MTG source existe et est actif
         let sourceMTG = await MediaTextContent.findOne({
-            _id: mongoose.Types.ObjectId(media_text_contain_id),
+            _id: mediaTextContainId,
             status: 'active',
             mtg_status: 'active'
         }).lean();
@@ -99,27 +111,26 @@ let addMTGToVendorStore = async (req, res) => {
             return res.status(404).send(response.generate(1, 'MTG not found or not active', {}));
         }
 
-        // Vérifier qu'il n'y a pas déjà une entrée pour ce couple (vendor_id + mtg_id)
         let existing = await VendorMediaTextContent.findOne({
-            media_text_contain_id: mongoose.Types.ObjectId(media_text_contain_id),
-            vendor_id: mongoose.Types.ObjectId(vendor_id)
+            media_text_contain_id: mediaTextContainId,
+            vendor_id: vendorId,
+            status: { $ne: 'deleted' }
         }).lean();
 
         if (existing) {
             return res.status(409).send(response.generate(1, 'This MTG is already added to your store', {}));
         }
 
-        // Créer l'entrée VendorMediaTextContent
         let newVendorMTG = new VendorMediaTextContent({
-            media_text_contain_id: mongoose.Types.ObjectId(media_text_contain_id),
-            vendor_id: mongoose.Types.ObjectId(vendor_id),
+            media_text_contain_id: mediaTextContainId,
+            vendor_id: vendorId,
             heading_text: sourceMTG.heading_text,
             description_text: sourceMTG.description_text,
             section_image: sourceMTG.section_image,
             section_image_name: sourceMTG.section_image_name || '',
             tags: sourceMTG.tags || [],
-            position: position || 0,
-            mtg_status: 'active', // Déjà approuvé car MTG source est actif
+            position,
+            mtg_status: 'active',
             status: 'active'
         });
 
@@ -135,8 +146,7 @@ let addMTGToVendorStore = async (req, res) => {
 
 /**
  * getVendorStoreLandingMTGs
- * Liste les MTGs de la landing page d'un vendor spécifique (pour le store web portal)
- * Inclut les MTGs d'autres vendors ajoutés par ce vendor
+ * Liste les MTGs de la landing page d'un vendor sp�cifique
  */
 let getVendorStoreLandingMTGs = async (req, res) => {
     try {
@@ -146,55 +156,66 @@ let getVendorStoreLandingMTGs = async (req, res) => {
             return res.status(400).send(response.generate(1, 'store_slug is required', {}));
         }
 
-        // Trouver le vendor via store_slug
-        let store = await Store.findOne({ store_slug: store_slug }).lean();
+        let store = await Store.findOne({ store_slug, status: 'active' }).select('_id store_slug store_owner').lean();
         if (!store) {
             return res.status(404).send(response.generate(1, 'Store not found', {}));
         }
 
-        let vendor_id = store.store_owner;
+        let vendorId = toObjectId(store.store_owner);
+        if (!vendorId) {
+            return res.status(404).send(response.generate(1, 'Store owner not found', {}));
+        }
 
-        // Trouver tous les VendorMediaTextContent pour ce vendor
         let vendorMTGs = await VendorMediaTextContent.find({
-            vendor_id: mongoose.Types.ObjectId(vendor_id),
+            vendor_id: vendorId,
             status: 'active',
             mtg_status: 'active'
         })
-        .populate({
-            path: 'media_text_contain_id',
-            select: 'vendor_id mtg_status heading_text description_text section_image'
-        })
-        .sort({ position: 1 })
-        .lean();
+            .populate({
+                path: 'media_text_contain_id',
+                select: 'vendor_id mtg_status heading_text description_text section_image status',
+                match: { status: 'active', mtg_status: 'active' }
+            })
+            .sort({ position: 1 })
+            .lean();
 
-        // Pour chaque MTG, déterminer le shop_now_store_slug
-        let enrichedMTGs = [];
-        for (let mtg of vendorMTGs) {
-            let shop_now_store_slug = store_slug; // par défaut: la boutique courante
-
-            // Si le MTG source a un vendor_id (créé par un autre vendor)
-            if (mtg.media_text_contain_id && mtg.media_text_contain_id.vendor_id) {
-                let originalVendorId = mtg.media_text_contain_id.vendor_id;
-
-                // Si ce vendor est différent du vendor courant
-                if (originalVendorId.toString() !== vendor_id.toString()) {
-                    // Trouver la boutique du vendor original
-                    let originalStore = await Store.findOne({
-                        store_owner: mongoose.Types.ObjectId(originalVendorId),
-                        status: 'active'
-                    }).select('store_slug').lean();
-
-                    if (originalStore) {
-                        shop_now_store_slug = originalStore.store_slug;
-                    }
-                }
+        const sourceVendorIds = new Set();
+        for (const mtg of vendorMTGs) {
+            const srcVendor = mtg?.media_text_contain_id?.vendor_id;
+            if (srcVendor && srcVendor.toString() !== vendorId.toString()) {
+                sourceVendorIds.add(srcVendor.toString());
             }
-
-            enrichedMTGs.push({
-                ...mtg,
-                shop_now_store_slug: shop_now_store_slug
-            });
         }
+
+        let sourceStoreMap = new Map();
+        if (sourceVendorIds.size > 0) {
+            const sourceStores = await Store.find({
+                store_owner: { $in: Array.from(sourceVendorIds).map(id => mongoose.Types.ObjectId(id)) },
+                status: 'active'
+            })
+                .select('store_owner store_slug')
+                .lean();
+
+            for (const s of sourceStores) {
+                sourceStoreMap.set(String(s.store_owner), s.store_slug);
+            }
+        }
+
+        const enrichedMTGs = vendorMTGs
+            .filter((mtg) => !!mtg.media_text_contain_id)
+            .map((mtg) => {
+                let shopNowStoreSlug = store.store_slug;
+                const srcVendor = mtg?.media_text_contain_id?.vendor_id ? String(mtg.media_text_contain_id.vendor_id) : null;
+
+                if (srcVendor && srcVendor !== String(vendorId) && sourceStoreMap.has(srcVendor)) {
+                    shopNowStoreSlug = sourceStoreMap.get(srcVendor);
+                }
+
+                return {
+                    ...mtg,
+                    shop_now_store_slug: shopNowStoreSlug
+                };
+            });
 
         let apiResponse = response.generate(0, 'Vendor store landing MTGs retrieved successfully', { mtgList: enrichedMTGs });
         res.status(200).send(apiResponse);

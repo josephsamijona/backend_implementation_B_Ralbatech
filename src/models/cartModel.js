@@ -24,6 +24,16 @@ const cart = new Schema({
         pro_slug: {
             type: String,
         },
+        product_owner_id: {
+            type: Schema.Types.ObjectId,
+            ref: 'vendor',
+            default: null
+        },
+        fulfiller_vendor_id: {
+            type: Schema.Types.ObjectId,
+            ref: 'vendor',
+            default: null
+        },
         left_eye_qty: {
             type: Number,
         },

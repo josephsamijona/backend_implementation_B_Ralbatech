@@ -17,7 +17,7 @@ const allowedOrigins = [
   'https://preview.ralbatech.com',
   'https://vendorstore.ralbatech.com',
   'https://store.ralbatech.com',
-  'https://backendimplementationbralbatech-production.up.railway.app',
+  'https://loving-passion-production-157f.up.railway.app',
   'https://ralbaoptical.com'
 ];
 

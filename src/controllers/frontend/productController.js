@@ -1305,19 +1305,34 @@ let filterAllStoreProduct = async (req, res) => {
  * Liste tous les produits de la plateforme (vue vendor)
  * Inclut les champs displayer/fulfiller pour le vendor authentifié
  */
+let toObjectId = (id) => {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        return null;
+    }
+    return mongoose.Types.ObjectId(id);
+};
+
+/**
+ * getPlatformAllProducts
+ * Liste tous les produits de la plateforme (vue vendor)
+ * Inclut les champs displayer/fulfiller pour le vendor authentifie
+ */
 let getPlatformAllProducts = async (req, res) => {
     try {
-        let vendor_id = req.body.vendor_id;
-        let page = req.body.page ? parseInt(req.body.page) : 1;
-        let limit = req.body.limit ? parseInt(req.body.limit) : 20;
-
-        if (checkLib.isEmpty(vendor_id)) {
-            return res.status(400).send(response.generate(1, 'vendor_id is required', {}));
+        const vendorId = toObjectId(req?.user?.vendor_id);
+        if (!vendorId) {
+            return res.status(401).send(response.generate(1, 'Invalid vendor token', {}));
         }
 
-        let totalCount = await Product.countDocuments({ status: 'active' });
+        let page = Number.parseInt(req.body.page, 10);
+        let limit = Number.parseInt(req.body.limit, 10);
+        if (!Number.isInteger(page) || page < 1) page = 1;
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200) limit = 20;
 
-        let products = await Product.find({ status: 'active' })
+        const query = { status: 'active' };
+        let totalCount = await Product.countDocuments(query);
+
+        let products = await Product.find(query)
             .populate('product_owner', 'name')
             .populate('product_brand', 'brand_name')
             .skip((page - 1) * limit)
@@ -1325,21 +1340,22 @@ let getPlatformAllProducts = async (req, res) => {
             .sort({ createdAt: -1 })
             .lean();
 
-        // Enrichir chaque produit avec les infos displayer/fulfiller du vendor
+        const vendorIdStr = String(vendorId);
         for (let product of products) {
-            let is_owner = product.product_owner && product.product_owner._id.toString() === vendor_id;
-            let df_entry = product.displayer_fulfiller
-                ? product.displayer_fulfiller.find(e => e.vendor_id && e.vendor_id.toString() === vendor_id)
-                : null;
+            const ownerId = product?.product_owner?._id ? String(product.product_owner._id) : '';
+            const is_owner = ownerId === vendorIdStr;
+            let df_entry = null;
+
+            if (Array.isArray(product.displayer_fulfiller)) {
+                df_entry = product.displayer_fulfiller.find((e) => e.vendor_id && String(e.vendor_id) === vendorIdStr) || null;
+            }
 
             product.is_owner = is_owner;
-            product.vendor_displayer_status = df_entry ? df_entry.displayer_status : 'none';
-            product.vendor_fulfiller_status = df_entry ? df_entry.fulfiller_status : 'none';
-            product.vendor_sales_price = df_entry ? df_entry.vendor_sales_price : null;
-            product.vendor_multi_vendor_support = df_entry ? df_entry.multi_vendor_support : true;
-            product.df_pending = df_entry
-                ? (df_entry.displayer_status === 'pending' || df_entry.fulfiller_status === 'pending')
-                : false;
+            product.vendor_displayer_status = df_entry ? (df_entry.displayer_status || 'none') : 'none';
+            product.vendor_fulfiller_status = df_entry ? (df_entry.fulfiller_status || 'none') : 'none';
+            product.vendor_sales_price = df_entry ? (df_entry.vendor_sales_price ?? null) : null;
+            product.vendor_multi_vendor_support = df_entry ? (df_entry.multi_vendor_support ?? true) : true;
+            product.df_pending = !!(df_entry && (df_entry.displayer_status === 'pending' || df_entry.fulfiller_status === 'pending'));
         }
 
         let apiResponse = response.generate(0, 'Success', {
@@ -1358,77 +1374,139 @@ let getPlatformAllProducts = async (req, res) => {
 
 /**
  * updateDisplayerFulfiller
- * Met à jour le statut displayer/fulfiller d'un vendor pour un produit
+ * Met a jour le statut displayer/fulfiller d'un vendor pour un produit
  */
 let updateDisplayerFulfiller = async (req, res) => {
     try {
-        let product_id = req.params.product_id;
-        let { vendor_id, displayer_status, fulfiller_status, vendor_sales_price, multi_vendor_support } = req.body;
-
-        if (checkLib.isEmpty(vendor_id)) {
-            return res.status(400).send(response.generate(1, 'vendor_id is required', {}));
+        const vendorId = toObjectId(req?.user?.vendor_id);
+        const productId = toObjectId(req.params.product_id);
+        if (!vendorId) {
+            return res.status(401).send(response.generate(1, 'Invalid vendor token', {}));
+        }
+        if (!productId) {
+            return res.status(400).send(response.generate(1, 'Invalid product_id', {}));
         }
 
-        let product = await Product.findById(product_id);
+        const allowedKeys = ['displayer_status', 'fulfiller_status', 'vendor_sales_price', 'multi_vendor_support', 'mtg_id'];
+        const providedKeys = Object.keys(req.body || {});
+
+        let product = await Product.findById(productId).select('product_owner displayer_fulfiller').lean();
         if (!product) {
             return res.status(404).send(response.generate(1, 'Product not found', {}));
         }
 
-        // Validation: vendor_sales_price requis si fulfiller_status !== 'none'
-        if (fulfiller_status && fulfiller_status !== 'none' && (vendor_sales_price === null || vendor_sales_price === undefined)) {
+        const isOwner = product.product_owner && String(product.product_owner) === String(vendorId);
+        const forbiddenKeys = providedKeys.filter((k) => !allowedKeys.includes(k));
+        if (!isOwner && forbiddenKeys.length > 0) {
+            return res.status(403).send(response.generate(1, `Forbidden fields for non-owner: ${forbiddenKeys.join(', ')}`, {}));
+        }
+        if (forbiddenKeys.length > 0) {
+            return res.status(400).send(response.generate(1, `Unknown fields: ${forbiddenKeys.join(', ')}`, {}));
+        }
+
+        const validStatuses = ['none', 'pending', 'active', 'inactive'];
+        if (req.body.displayer_status !== undefined && !validStatuses.includes(req.body.displayer_status)) {
+            return res.status(400).send(response.generate(1, 'displayer_status is invalid', {}));
+        }
+        if (req.body.fulfiller_status !== undefined && !validStatuses.includes(req.body.fulfiller_status)) {
+            return res.status(400).send(response.generate(1, 'fulfiller_status is invalid', {}));
+        }
+
+        let numericVendorPrice = undefined;
+        if (req.body.vendor_sales_price !== undefined) {
+            numericVendorPrice = Number(req.body.vendor_sales_price);
+            if (!Number.isFinite(numericVendorPrice) || numericVendorPrice <= 0) {
+                return res.status(400).send(response.generate(1, 'vendor_sales_price must be a positive number', {}));
+            }
+        }
+
+        let mtgId = undefined;
+        if (req.body.mtg_id !== undefined) {
+            if (req.body.mtg_id === null || req.body.mtg_id === '') {
+                mtgId = null;
+            } else {
+                mtgId = toObjectId(req.body.mtg_id);
+                if (!mtgId) {
+                    return res.status(400).send(response.generate(1, 'mtg_id is invalid', {}));
+                }
+            }
+        }
+
+        const existing = (product.displayer_fulfiller || []).find((e) => e.vendor_id && String(e.vendor_id) === String(vendorId)) || null;
+
+        let nextDisplayerStatus = existing ? (existing.displayer_status || 'none') : 'none';
+        let nextFulfillerStatus = existing ? (existing.fulfiller_status || 'none') : 'none';
+
+        const requestedDisplayer = req.body.displayer_status;
+        const requestedFulfiller = req.body.fulfiller_status;
+
+        if (requestedDisplayer !== undefined) {
+            nextDisplayerStatus = requestedDisplayer === 'none' ? 'none' : 'pending';
+        }
+        if (requestedFulfiller !== undefined) {
+            nextFulfillerStatus = requestedFulfiller === 'none' ? 'none' : 'pending';
+        }
+
+        const triggersReapproval = (
+            requestedDisplayer !== undefined ||
+            requestedFulfiller !== undefined ||
+            numericVendorPrice !== undefined ||
+            req.body.multi_vendor_support !== undefined ||
+            mtgId !== undefined
+        );
+
+        if (existing && triggersReapproval) {
+            if (nextDisplayerStatus !== 'none') nextDisplayerStatus = 'pending';
+            if (nextFulfillerStatus !== 'none') nextFulfillerStatus = 'pending';
+        }
+
+        let nextVendorPrice = existing ? (existing.vendor_sales_price ?? null) : null;
+        if (numericVendorPrice !== undefined) {
+            nextVendorPrice = numericVendorPrice;
+        }
+        if (nextFulfillerStatus === 'none') {
+            nextVendorPrice = null;
+        }
+        if (nextFulfillerStatus !== 'none' && (nextVendorPrice === null || nextVendorPrice === undefined)) {
             return res.status(400).send(response.generate(1, 'vendor_sales_price is required when fulfiller_status is set', {}));
         }
 
-        let is_owner = product.product_owner && product.product_owner.toString() === vendor_id;
+        if (existing) {
+            let setPayload = {
+                'displayer_fulfiller.$[elem].displayer_status': nextDisplayerStatus,
+                'displayer_fulfiller.$[elem].fulfiller_status': nextFulfillerStatus,
+                'displayer_fulfiller.$[elem].vendor_sales_price': nextVendorPrice
+            };
 
-        // Forcer le statut à 'pending' — un vendor ne peut jamais s'auto-approuver
-        let safeDisplayerStatus = displayer_status && displayer_status !== 'none' ? 'pending' : (displayer_status || 'none');
-        let safeFulfillerStatus = fulfiller_status && fulfiller_status !== 'none' ? 'pending' : (fulfiller_status || 'none');
-
-        // Chercher entrée existante
-        let existingIndex = product.displayer_fulfiller
-            ? product.displayer_fulfiller.findIndex(e => e.vendor_id && e.vendor_id.toString() === vendor_id)
-            : -1;
-
-        if (existingIndex >= 0) {
-            // Mettre à jour l'entrée existante
-            let updateFields = {};
-
-            if (displayer_status !== undefined) {
-                updateFields[`displayer_fulfiller.${existingIndex}.displayer_status`] = safeDisplayerStatus;
+            if (req.body.multi_vendor_support !== undefined) {
+                setPayload['displayer_fulfiller.$[elem].multi_vendor_support'] = !!req.body.multi_vendor_support;
             }
-            if (fulfiller_status !== undefined) {
-                updateFields[`displayer_fulfiller.${existingIndex}.fulfiller_status`] = safeFulfillerStatus;
-            }
-            if (vendor_sales_price !== undefined) {
-                updateFields[`displayer_fulfiller.${existingIndex}.vendor_sales_price`] = vendor_sales_price;
-            }
-            if (multi_vendor_support !== undefined) {
-                updateFields[`displayer_fulfiller.${existingIndex}.multi_vendor_support`] = multi_vendor_support;
+            if (mtgId !== undefined) {
+                setPayload['displayer_fulfiller.$[elem].mtg_id'] = mtgId;
             }
 
             await Product.updateOne(
-                { _id: product_id },
-                { $set: updateFields }
+                { _id: productId },
+                { $set: setPayload },
+                { arrayFilters: [{ 'elem.vendor_id': vendorId }] }
             );
         } else {
-            // Créer nouvelle entrée
-            let newEntry = {
-                vendor_id: mongoose.Types.ObjectId(vendor_id),
-                displayer_status: safeDisplayerStatus,
-                fulfiller_status: safeFulfillerStatus,
-                multi_vendor_support: multi_vendor_support !== undefined ? multi_vendor_support : true,
-                vendor_sales_price: vendor_sales_price || null,
-                mtg_id: req.body.mtg_id ? mongoose.Types.ObjectId(req.body.mtg_id) : null
+            const newEntry = {
+                vendor_id: vendorId,
+                displayer_status: nextDisplayerStatus,
+                fulfiller_status: nextFulfillerStatus,
+                multi_vendor_support: req.body.multi_vendor_support !== undefined ? !!req.body.multi_vendor_support : true,
+                vendor_sales_price: nextVendorPrice,
+                mtg_id: mtgId !== undefined ? mtgId : null
             };
 
             await Product.updateOne(
-                { _id: product_id },
+                { _id: productId },
                 { $push: { displayer_fulfiller: newEntry } }
             );
         }
 
-        let updatedProduct = await Product.findById(product_id).lean();
+        let updatedProduct = await Product.findById(productId).lean();
         let apiResponse = response.generate(0, 'Displayer-fulfiller updated successfully. Pending admin approval.', updatedProduct);
         res.status(200).send(apiResponse);
 
@@ -1444,9 +1522,13 @@ let updateDisplayerFulfiller = async (req, res) => {
  */
 let getProductFulfillers = async (req, res) => {
     try {
-        let product_id = req.params.product_id;
+        const productId = toObjectId(req.params.product_id);
+        if (!productId) {
+            return res.status(400).send(response.generate(1, 'Invalid product_id', {}));
+        }
 
-        let product = await Product.findById(product_id)
+        let product = await Product.findById(productId)
+            .populate('product_owner', 'name')
             .populate('displayer_fulfiller.vendor_id', 'name')
             .populate('displayer_fulfiller.mtg_id')
             .lean();
@@ -1455,33 +1537,74 @@ let getProductFulfillers = async (req, res) => {
             return res.status(404).send(response.generate(1, 'Product not found', {}));
         }
 
-        // Filtrer: fulfiller_status === 'active' ET multi_vendor_support === true
-        let activeFulfillers = (product.displayer_fulfiller || []).filter(
-            f => f.fulfiller_status === 'active' && f.multi_vendor_support === true
-        );
+        const fulfillersMap = new Map();
+        const ownerVendorId = product?.product_owner?._id ? String(product.product_owner._id) : null;
+        const ownerPrice = product.product_sale_price !== null && product.product_sale_price !== undefined
+            ? product.product_sale_price
+            : product.product_retail_price;
 
-        // Si count <= 1 → pas de bouton "Choose vendor"
-        if (activeFulfillers.length <= 1) {
-            return res.status(200).send(response.generate(0, 'Success', { fulfillers: [] }));
+        if (ownerVendorId) {
+            fulfillersMap.set(ownerVendorId, {
+                vendor_id: {
+                    _id: product.product_owner._id,
+                    name: product.product_owner.name || ''
+                },
+                fulfiller_status: 'active',
+                multi_vendor_support: true,
+                vendor_sales_price: ownerPrice,
+                mtg_id: null
+            });
         }
 
-        // Enrichir avec les infos du store
-        let enrichedFulfillers = [];
-        for (let fulfiller of activeFulfillers) {
-            let store = null;
-            if (fulfiller.vendor_id && fulfiller.vendor_id._id) {
-                store = await Store.findOne({
-                    store_owner: fulfiller.vendor_id._id,
-                    status: 'active'
-                }).select('store_name store_slug logo').lean();
+        for (const entry of (product.displayer_fulfiller || [])) {
+            if (entry.fulfiller_status !== 'active' || entry.multi_vendor_support !== true) {
+                continue;
             }
 
-            enrichedFulfillers.push({
-                ...fulfiller,
+            const entryVendorId = entry?.vendor_id?._id ? String(entry.vendor_id._id) : (entry.vendor_id ? String(entry.vendor_id) : null);
+            if (!entryVendorId) {
+                continue;
+            }
+
+            const entryName = entry?.vendor_id?.name || '';
+            const entryPrice = entry.vendor_sales_price;
+            if (entryPrice === null || entryPrice === undefined) {
+                continue;
+            }
+
+            fulfillersMap.set(entryVendorId, {
+                ...entry,
+                vendor_id: {
+                    _id: entry?.vendor_id?._id || entry.vendor_id,
+                    name: entryName
+                },
+                vendor_sales_price: entryPrice
+            });
+        }
+
+        const vendorIds = Array.from(fulfillersMap.keys()).map((id) => mongoose.Types.ObjectId(id));
+        const storeRows = await Store.find({
+            store_owner: { $in: vendorIds },
+            status: 'active'
+        }).select('store_owner store_name store_slug logo').lean();
+
+        const storesByVendor = new Map();
+        for (const store of storeRows) {
+            storesByVendor.set(String(store.store_owner), store);
+        }
+
+        const enrichedFulfillers = Array.from(fulfillersMap.entries()).map(([vendorId, entry]) => {
+            const store = storesByVendor.get(vendorId);
+            return {
+                ...entry,
                 store_name: store ? store.store_name : '',
                 store_slug: store ? store.store_slug : '',
                 store_logo: store ? store.logo : ''
-            });
+            };
+        });
+
+        if (enrichedFulfillers.length <= 1) {
+            return res.status(200).send(response.generate(0, 'Success', { fulfillers: [] }));
         }
 
         let apiResponse = response.generate(0, 'Success', { fulfillers: enrichedFulfillers });
