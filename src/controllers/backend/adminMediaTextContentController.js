@@ -330,6 +330,15 @@ let updateMTGStatus = async (req, res) => {
             return res.status(404).send(response.generate(1, 'MTG not found', {}));
         }
 
+        // Keep vendor MTG copies in sync with platform MTG approval state.
+        await VendorMediaTextContentModel.updateMany(
+            {
+                media_text_contain_id: mongoose.Types.ObjectId(mtg_id),
+                status: { $ne: 'deleted' }
+            },
+            { $set: { mtg_status: mtg_status } }
+        );
+
         let apiResponse = response.generate(0, `MTG status updated to ${mtg_status}`, updatedMTG);
         res.status(200).send(apiResponse);
 
@@ -370,3 +379,4 @@ module.exports = {
     updateMTGStatus: updateMTGStatus,
     getPendingMTGs: getPendingMTGs,
 }
+

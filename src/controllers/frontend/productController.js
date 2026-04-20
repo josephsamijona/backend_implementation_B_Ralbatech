@@ -10,10 +10,25 @@ const { object } = require("joi");
 const commonLib = require("../../libs/commonLib");
 const addonModel = require("../../models/addonModel");
 const Store = require("../../models/storeModel")
+const VendorMediaTextContent = require("../../models/vendorMediaTextContentModel");
 const checkLib = require("../../libs/checkLib");
 const categoryModel = require("../../models/categoryModel");
 // added to take tag into account in product filtering
 const Tag = require('../../models/tagModel');
+
+const buildStoreVisibilityMatch = (vendorId) => ({
+    $or: [
+        { product_owner: mongoose.Types.ObjectId(vendorId) },
+        {
+            displayer_fulfiller: {
+                $elemMatch: {
+                    vendor_id: mongoose.Types.ObjectId(vendorId),
+                    displayer_status: 'active'
+                }
+            }
+        }
+    ]
+});
 
 /**
     * @author Ankush Shome
@@ -585,9 +600,12 @@ let filterStoreProduct = async (req, res) => {
         let skip = (page - 1) * limit; // Calculate how many records to skip
 
         const matchConditions = {
-            "status": 'active',
-            "product_owner": mongoose.Types.ObjectId(vendor_id)
+            status: 'active',
+            ...buildStoreVisibilityMatch(vendor_id)
         };
+        const normalizedTagIds = Array.isArray(req.body.tag_ids)
+            ? req.body.tag_ids.filter((id) => id && String(id).trim().length > 0)
+            : [];
 
         if (req.body.brand) {
             matchConditions.product_brand = mongoose.Types.ObjectId(req.body.brand);
@@ -604,8 +622,10 @@ let filterStoreProduct = async (req, res) => {
 
         record = await Product.aggregate([
             {
-                $match: matchConditions,
-                stock: { $gt: 0 } // Ensure only products with stock > 0 are counted
+                $match: {
+                    ...matchConditions,
+                    stock: { $gt: 0 } // Ensure only products with stock > 0 are counted
+                }
             },
             {
                 $lookup: {
@@ -676,8 +696,10 @@ let filterStoreProduct = async (req, res) => {
         // Get the total count of 3D products matching the conditions
         let total3DCount = await Product.aggregate([
             {
-                $match: matchConditions,
-                stock: { $gt: 0 } // Ensure only products with stock > 0 are counted
+                $match: {
+                    ...matchConditions,
+                    stock: { $gt: 0 } // Ensure only products with stock > 0 are counted
+                }
             },
             {
                 $match: {
@@ -742,7 +764,7 @@ let homefilterStoreProduct = async (req, res) => {
             {
                 $match: {
                     "status": 'active',
-                    "product_owner": mongoose.Types.ObjectId(vendor_id),
+                    ...buildStoreVisibilityMatch(vendor_id),
                     stock: { $gt: 0 } // Ensure only products with stock > 0 are counted
                 }
             },
@@ -884,8 +906,8 @@ let filterContactProduct = async (req, res) => {
         let skip = (page - 1) * limit; // Calculate how many records to skip
 
         const matchConditions = {
-            "status": 'active',
-            "product_owner": mongoose.Types.ObjectId(vendor_id)
+            status: 'active',
+            ...buildStoreVisibilityMatch(vendor_id)
         };
 
         if (req.body.brand) {
@@ -1084,8 +1106,8 @@ let filterAllStoreProduct = async (req, res) => {
         let newtagid = '';
 
         const matchConditions = {
-            "status": 'active',
-            "product_owner": mongoose.Types.ObjectId(vendor_id)
+            status: 'active',
+            ...buildStoreVisibilityMatch(vendor_id)
         };
 
         if (req.body.brand) {
@@ -1136,15 +1158,21 @@ let filterAllStoreProduct = async (req, res) => {
            
            tagname = categoryName + " Eyeglasses";
            try {
-              const tags = await Tag.find({ _id: { $in: req.body.tag_ids } }).select("tag_name");
-              if (tags[0].tag_name != 'EightToEighty Eyeglasses' && tags[0].tag_name != 'New Arrivals' && 
-                  tags[0].tag_name != 'Men Eyeglasses' && tags[0].tag_name != 'Women Eyeglasses' && 
-                  tags[0].tag_name != 'Unisex Eyeglasses'){
-                 tagname = `${categoryName} ${tags[0].tag_name}`.trim();
-                 const newtags = await Tag.find({ tag_name: tagname }).select("_id");
-                 newtagid = newtags[0]?._id.toString();
-              }
-              else{
+              if (normalizedTagIds.length > 0) {
+                  const tags = await Tag.find({ _id: { $in: normalizedTagIds } }).select("tag_name");
+                  const firstTagName = tags[0]?.tag_name;
+                  if (
+                      firstTagName &&
+                      firstTagName != 'EightToEighty Eyeglasses' &&
+                      firstTagName != 'New Arrivals' &&
+                      firstTagName != 'Men Eyeglasses' &&
+                      firstTagName != 'Women Eyeglasses' &&
+                      firstTagName != 'Unisex Eyeglasses'
+                  ) {
+                      tagname = `${categoryName} ${firstTagName}`.trim();
+                      const newtags = await Tag.find({ tag_name: tagname }).select("_id");
+                      newtagid = newtags[0]?._id.toString();
+                  }
               }
            } catch (err) {
               console.log("error creating new tag");
@@ -1174,11 +1202,12 @@ let filterAllStoreProduct = async (req, res) => {
             }
         }
 
+        const requestedTagIds = normalizedTagIds;
+
         // Tag filters: prefer multiple tag_ids if provided; otherwise fall back to single tag_id
-        if (Array.isArray(req.body.tag_ids) && req.body.tag_ids.length > 0) {
-            // Remove empty/falsy IDs so payloads like [""] are ignored safely
-            const tagIds = req.body.tag_ids.filter(id => id && String(id).trim().length > 0);
-           //append the newly generated tagname to the tagIds list received
+        if (requestedTagIds.length > 0) {
+           // append the newly generated tagname to the tagIds list received
+            const tagIds = [...requestedTagIds];
             if (tagIds.length > 0) {
                if (newtagid != '' && newtagid != null)
                   tagIds.push(newtagid);
@@ -1198,7 +1227,7 @@ let filterAllStoreProduct = async (req, res) => {
        if(tagname == "Unisex Eyeglasses")
           delete matchConditions['tags._id'];
        //strangely for the tag._id corresponding to Unisex Eyeglasses the matchCondtions for tags._id does not work
-       if (req.body.tag_ids[0] == '6806a7ccfc44e2f2a16d484f' && (req.body.product_category=='' || req.body.product_category=='unisex')){
+       if (requestedTagIds[0] == '6806a7ccfc44e2f2a16d484f' && (req.body.product_category=='' || req.body.product_category=='unisex')){
           delete matchConditions['tags._id'];
           matchConditions.tags = { $elemMatch: { tag_name: "Unisex Eyeglasses" } };         
        }
@@ -1355,6 +1384,7 @@ let getPlatformAllProducts = async (req, res) => {
             product.vendor_fulfiller_status = df_entry ? (df_entry.fulfiller_status || 'none') : 'none';
             product.vendor_sales_price = df_entry ? (df_entry.vendor_sales_price ?? null) : null;
             product.vendor_multi_vendor_support = df_entry ? (df_entry.multi_vendor_support ?? true) : true;
+            product.vendor_mtg_id = df_entry ? (df_entry.mtg_id ?? null) : null;
             product.df_pending = !!(df_entry && (df_entry.displayer_status === 'pending' || df_entry.fulfiller_status === 'pending'));
         }
 
@@ -1429,6 +1459,18 @@ let updateDisplayerFulfiller = async (req, res) => {
                 if (!mtgId) {
                     return res.status(400).send(response.generate(1, 'mtg_id is invalid', {}));
                 }
+            }
+        }
+
+        if (mtgId) {
+            const mtgRecord = await VendorMediaTextContent.findOne({
+                _id: mtgId,
+                vendor_id: vendorId,
+                status: 'active',
+                mtg_status: 'active'
+            }).select('_id').lean();
+            if (!mtgRecord) {
+                return res.status(400).send(response.generate(1, 'mtg_id must be an active MTG from your store', {}));
             }
         }
 
@@ -1599,7 +1641,8 @@ let getProductFulfillers = async (req, res) => {
                 ...entry,
                 store_name: store ? store.store_name : '',
                 store_slug: store ? store.store_slug : '',
-                store_logo: store ? store.logo : ''
+                store_logo: store ? store.logo : '',
+                store_path: store ? `/${store.store_slug}` : ''
             };
         });
 

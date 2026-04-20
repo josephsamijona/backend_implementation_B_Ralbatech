@@ -2,6 +2,7 @@ const response = require("../../libs/responseLib");
 const Review = require('../../models/reviewsModel');
 const mongoose = require('mongoose');
 const checkLib = require("../../libs/checkLib");
+const token = require("../../libs/tokenLib");
 
 const toObjectId = (id) => {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
@@ -9,6 +10,22 @@ const toObjectId = (id) => {
     }
     return mongoose.Types.ObjectId(id);
 };
+
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const decodeOptionalUserFromToken = (req) => new Promise((resolve) => {
+    const authHeader = req.header('Authorization') || '';
+    if (!authHeader.startsWith('Bearer ')) {
+        return resolve(null);
+    }
+
+    const actualToken = authHeader.split(' ')[1];
+    token.verifyClaimWithoutSecret(actualToken, (err, decoded) => {
+        if (err || !decoded?.data) {
+            return resolve(null);
+        }
+        resolve(decoded.data);
+    });
+});
 
 /**
  * getVendorReviews
@@ -77,10 +94,21 @@ let createReview = async (req, res) => {
             }
         }
 
+        let resolvedReviewerEmail = typeof reviewer_email === 'string' ? reviewer_email.trim() : '';
+        if (!resolvedReviewerEmail) {
+            const decodedUser = await decodeOptionalUserFromToken(req);
+            if (decodedUser?.email && typeof decodedUser.email === 'string') {
+                resolvedReviewerEmail = decodedUser.email.trim().toLowerCase();
+            }
+        }
+        if (resolvedReviewerEmail && !emailRegex.test(resolvedReviewerEmail)) {
+            return res.status(400).send(response.generate(1, 'reviewer_email is invalid', {}));
+        }
+
         let newReview = new Review({
             vendor_id: vendorId,
             product_id: productId,
-            reviewer_email: reviewer_email || '',
+            reviewer_email: resolvedReviewerEmail,
             comment_text: cleanComment
         });
 

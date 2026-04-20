@@ -156,7 +156,7 @@ let getVendorStoreLandingMTGs = async (req, res) => {
             return res.status(400).send(response.generate(1, 'store_slug is required', {}));
         }
 
-        let store = await Store.findOne({ store_slug, status: 'active' }).select('_id store_slug store_owner').lean();
+        let store = await Store.findOne({ store_slug, status: 'active' }).select('_id store_slug store_name logo store_owner').lean();
         if (!store) {
             return res.status(404).send(response.generate(1, 'Store not found', {}));
         }
@@ -193,11 +193,15 @@ let getVendorStoreLandingMTGs = async (req, res) => {
                 store_owner: { $in: Array.from(sourceVendorIds).map(id => mongoose.Types.ObjectId(id)) },
                 status: 'active'
             })
-                .select('store_owner store_slug')
+                .select('store_owner store_slug store_name logo')
                 .lean();
 
             for (const s of sourceStores) {
-                sourceStoreMap.set(String(s.store_owner), s.store_slug);
+                sourceStoreMap.set(String(s.store_owner), {
+                    store_slug: s.store_slug,
+                    store_name: s.store_name || '',
+                    store_logo: s.logo || ''
+                });
             }
         }
 
@@ -205,15 +209,24 @@ let getVendorStoreLandingMTGs = async (req, res) => {
             .filter((mtg) => !!mtg.media_text_contain_id)
             .map((mtg) => {
                 let shopNowStoreSlug = store.store_slug;
+                let shopNowStoreName = store.store_name || '';
+                let shopNowStoreLogo = store.logo || '';
                 const srcVendor = mtg?.media_text_contain_id?.vendor_id ? String(mtg.media_text_contain_id.vendor_id) : null;
 
                 if (srcVendor && srcVendor !== String(vendorId) && sourceStoreMap.has(srcVendor)) {
-                    shopNowStoreSlug = sourceStoreMap.get(srcVendor);
+                    const sourceStore = sourceStoreMap.get(srcVendor);
+                    shopNowStoreSlug = sourceStore.store_slug;
+                    shopNowStoreName = sourceStore.store_name;
+                    shopNowStoreLogo = sourceStore.store_logo;
                 }
 
                 return {
                     ...mtg,
-                    shop_now_store_slug: shopNowStoreSlug
+                    shop_now_store_slug: shopNowStoreSlug,
+                    shop_now_store_name: shopNowStoreName,
+                    shop_now_store_logo: shopNowStoreLogo,
+                    shop_now_store_path: `/${shopNowStoreSlug}`,
+                    is_cross_store: shopNowStoreSlug !== store.store_slug
                 };
             });
 
@@ -232,3 +245,4 @@ module.exports = {
     addMTGToVendorStore,
     getVendorStoreLandingMTGs
 };
+
